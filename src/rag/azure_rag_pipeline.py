@@ -18,7 +18,7 @@ import json
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Azure imports
 from azure.search.documents import SearchClient
@@ -108,9 +108,10 @@ class DocumentProcessor:
     
     def extract_metadata(self, filename: str) -> Dict[str, Any]:
         """Extract metadata from filename."""
+        now = datetime.now(timezone.utc).replace(microsecond=0)
         metadata = {
             'filename': filename,
-            'processed_date': datetime.now().isoformat()
+            'processed_date': now.isoformat()
         }
         
         # Extract company symbol from filename (e.g., "GOOGL_10K_2023_xxx.htm")
@@ -273,7 +274,8 @@ class AzureSearchManager:
                 vector_queries=[{
                     "vector": query_vector,
                     "k_nearest_neighbors": top_k,
-                    "fields": "vector"
+                    "fields": "vector",
+                    "kind": "vector"
                 }],
                 filter=filters,
                 select=["id", "content", "company", "year", "filing_type", "chunk_id"],
