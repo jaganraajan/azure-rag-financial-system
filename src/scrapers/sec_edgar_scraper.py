@@ -21,10 +21,12 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from datetime import datetime
 import json
+from azure.storage.blob import BlobServiceClient
 
 # Azure Storage (optional)
 try:
     from azure.storage.blob import BlobServiceClient
+    from dotenv import load_dotenv
     AZURE_STORAGE_AVAILABLE = True
 except ImportError:
     AZURE_STORAGE_AVAILABLE = False
@@ -484,6 +486,21 @@ def create_demo_filings(output_dir: str = "demo_filings"):
     
     created_files = []
     
+    load_dotenv()
+    connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+    container_name = "filings"
+    blob_service_client = None
+    container_client = None
+    if connection_string:
+        print("Azure Storage connection string found, initializing client...")
+        blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+        container_client = blob_service_client.get_container_client(container_name)
+        try:
+            print('Creating container if not exists...')
+            container_client.create_container()
+        except Exception:
+            pass  # Container may already exist
+    
     for company, company_info in demo_data.items():
         for year, financials in company_info['years'].items():
             content = demo_content_template.format(
@@ -492,17 +509,20 @@ def create_demo_filings(output_dir: str = "demo_filings"):
                 year=year,
                 **financials
             )
-            
             filename = f"{company}_10K_{year}_demo.htm"
             file_path = os.path.join(output_dir, filename)
-            
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            
             created_files.append(file_path)
             logger.info(f"Created demo filing: {filename}")
+            # Upload to Azure Blob Storage if configured
+            if container_client:
+                blob_name = os.path.basename(file_path)
+                with open(file_path, "rb") as data:
+                    container_client.upload_blob(name=blob_name, data=data, overwrite=True)
+                print(f"Uploaded {filename} to Azure Blob Storage container '{container_name}'")
     
-    logger.info(f"Created {len(created_files)} demo filings in {output_dir}")
+    print(f"Created {len(created_files)} demo filings in {output_dir}")
     return created_files
 
 
