@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Project Documentation - Azure RAG Financial System{% endblock %}
+{% block content %}
+<div class="card mt-4">
+    <div class="card-body">
+        <h1 class="card-title">Azure RAG Financial System Documentation</h1>
+        <h2>Overview</h2>
+        <p>This application provides a web interface for querying financial documents using Azure Cognitive Search and Azure OpenAI. It supports document ingestion, semantic search, and LLM-powered Q&A.</p>
+        <h2>Deployment Steps</h2>
+        <ol>
+            <li>Provision Azure resources: Web App, Cognitive Search, OpenAI, Storage Account, Key Vault.</li>
+            <li>Configure environment variables for service credentials.</li>
+            <li>Deploy the application code to Azure Web App.</li>
+            <li>Run the scrapper and document ingestion scripts.</li>
+        </ol>
+        <h2>Running the Scrapper</h2>
+        <pre>python main.py rag --process --input-dir demo_filings</pre>
+        <p>This command processes documents and uploads embeddings to Azure Cognitive Search.</p>
+        <h2>Viewing Data in Vector Store</h2>
+        <ul>
+            <li>Go to Azure Portal &rarr; Cognitive Search &rarr; Search Explorer to view indexed documents.</li>
+            <li>Use the web app's query interface for semantic search and Q&A.</li>
+        </ul>
+        <h2>Useful Links</h2>
+        <ul>
+            <li><a href="https://portal.azure.com" target="_blank">Azure Portal</a></li>
+            <li><a href="https://oai.azure.com/portal" target="_blank">Azure OpenAI Studio</a></li>
+            <li><a href="https://learn.microsoft.com/en-us/azure/search/" target="_blank">Azure Cognitive Search Docs</a></li>
+        </ul>
+    </div>
+</div>
+{% endblock %}
