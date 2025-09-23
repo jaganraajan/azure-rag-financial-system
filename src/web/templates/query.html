@@ -1,0 +1,208 @@
+
+{% extends "base.html" %}
+
+{% block title %}Query - Azure RAG Financial System{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <h1><i class="fas fa-search me-2"></i>Financial Query Interface</h1>
+        <p class="lead">Ask questions about financial documents using natural language.</p>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body text-center">
+                {% if rag_available %}
+                    <i class="fas fa-robot text-primary fa-2x"></i>
+                    <h6 class="mt-2">Azure AI Ready</h6>
+                {% else %}
+                    <i class="fas fa-robot text-muted fa-2x"></i>
+                    <h6 class="mt-2">AI Unavailable</h6>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if not rag_available %}
+<div class="alert alert-warning">
+    <i class="fas fa-exclamation-triangle me-2"></i>
+    Azure RAG pipeline is not available. Please check your configuration.
+</div>
+{% endif %}
+
+<div class="row mt-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5>Ask a Question</h5>
+            </div>
+            <div class="card-body">
+                <form id="queryForm">
+                    <div class="mb-3">
+                        <textarea 
+                            class="form-control" 
+                            id="queryText" 
+                            rows="3" 
+                            placeholder="Enter your question about financial documents..."
+                            {% if not rag_available %}disabled{% endif %}
+                        ></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label for="topK" class="form-label">Number of sources:</label>
+                            <select class="form-select" id="topK" {% if not rag_available %}disabled{% endif %}>
+                                <option value="3">3</option>
+                                <option value="5" selected>5</option>
+                                <option value="10">10</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <button 
+                                type="submit" 
+                                class="btn btn-primary w-100"
+                                {% if not rag_available %}disabled{% endif %}
+                            >
+                                <i class="fas fa-search me-2"></i>Search
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <div id="loadingIndicator" class="text-center mt-3" style="display: none;">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Searching financial documents...</p>
+        </div>
+        
+        <div id="queryResults" class="mt-4"></div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5>Example Questions</h5>
+            </div>
+            <div class="card-body">
+                <div class="list-group list-group-flush">
+                    <button class="list-group-item list-group-item-action example-query" 
+                            data-query="What are Microsoft's main revenue sources?">
+                        Microsoft revenue sources
+                    </button>
+                    <button class="list-group-item list-group-item-action example-query" 
+                            data-query="Compare operating margins for Google and NVIDIA">
+                        Compare operating margins
+                    </button>
+                    <button class="list-group-item list-group-item-action example-query" 
+                            data-query="What risk factors does NVIDIA mention in their 10-K?">
+                        NVIDIA risk factors
+                    </button>
+                    <button class="list-group-item list-group-item-action example-query" 
+                            data-query="How did Google's revenue change from 2022 to 2023?">
+                        Google revenue trends
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const queryForm = document.getElementById('queryForm');
+    const queryText = document.getElementById('queryText');
+    const topK = document.getElementById('topK');
+    const loadingIndicator = document.getElementById('loadingIndicator');
+    const queryResults = document.getElementById('queryResults');
+    const exampleButtons = document.querySelectorAll('.example-query');
+    
+    // Handle example query clicks
+    exampleButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            queryText.value = this.dataset.query;
+        });
+    });
+    
+    // Handle form submission
+    queryForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const query = queryText.value.trim();
+        if (!query) {
+            alert('Please enter a question');
+            return;
+        }
+        
+        // Show loading indicator
+        loadingIndicator.style.display = 'block';
+        queryResults.innerHTML = '';
+        
+        // Send query to API
+        fetch('/api/query', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                query: query,
+                top_k: parseInt(topK.value)
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            loadingIndicator.style.display = 'none';
+            displayResults(data);
+        })
+        .catch(error => {
+            loadingIndicator.style.display = 'none';
+            console.error('Error:', error);
+            queryResults.innerHTML = '<div class="alert alert-danger">Error processing query: ' + error + '</div>';
+        });
+    });
+    
+    function displayResults(data) {
+        if (data.error) {
+            queryResults.innerHTML = '<div class="alert alert-danger">' + data.error + '</div>';
+            return;
+        }
+        
+        const confidence = data.confidence || 0;
+        const confidenceClass = confidence > 0.7 ? 'confidence-high' : confidence > 0.4 ? 'confidence-medium' : 'confidence-low';
+        
+        let html = '<div class="query-result">';
+        html += '<h4><i class="fas fa-lightbulb me-2"></i>Answer</h4>';
+        html += '<p class="lead">' + (data.answer || 'No answer generated') + '</p>';
+        html += '<div class="row mt-3">';
+        html += '<div class="col-md-6">';
+        html += '<small class="text-muted">Confidence: <span class="' + confidenceClass + '">' + (confidence * 100).toFixed(1) + '%</span></small>';
+        html += '</div>';
+        html += '<div class="col-md-6 text-end">';
+        html += '<small class="text-muted">Sources: ' + (data.sources ? data.sources.length : 0) + '</small>';
+        html += '</div>';
+        html += '</div>';
+        html += '</div>';
+        
+        if (data.sources && data.sources.length > 0) {
+            html += '<h5 class="mt-4"><i class="fas fa-file-alt me-2"></i>Sources</h5>';
+            data.sources.forEach((source, index) => {
+                html += '<div class="card source-card mt-2">';
+                html += '<div class="card-body">';
+                html += '<h6 class="card-title">' + (source.company || 'Unknown') + ' (' + (source.year || 'Unknown') + ')</h6>';
+                html += '<p class="card-text">' + (source.excerpt || '') + '</p>';
+                html += '<small class="text-muted">Score: ' + (source.score || 0).toFixed(3) + '</small>';
+                html += '</div>';
+                html += '</div>';
+            });
+        }
+        
+        queryResults.innerHTML = html;
+    }
+});
+</script>
+{% endblock %}
+    
