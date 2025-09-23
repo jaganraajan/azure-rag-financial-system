@@ -1,0 +1,106 @@
+
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Azure RAG Financial System{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <h1><i class="fas fa-tachometer-alt me-2"></i>System Dashboard</h1>
+        <p class="lead">Azure-powered financial document analysis and querying system.</p>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body text-center">
+                {% if rag_available %}
+                    <i class="fas fa-check-circle text-success fa-3x"></i>
+                    <h5 class="card-title mt-2">System Online</h5>
+                    <p class="text-success">Azure RAG pipeline is active</p>
+                {% else %}
+                    <i class="fas fa-exclamation-triangle text-warning fa-3x"></i>
+                    <h5 class="card-title mt-2">System Offline</h5>
+                    <p class="text-warning">Azure RAG pipeline not available</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    {% if stats and 'error' not in stats %}
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="card-metric">{{ stats.total_documents }}</div>
+                <h5 class="card-title">Documents</h5>
+                <p class="card-text">Indexed in Azure AI Search</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="card-metric">{{ stats.index_name }}</div>
+                <h5 class="card-title">Search Index</h5>
+                <p class="card-text">Azure AI Search Index</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="card-metric">{{ stats.service_name }}</div>
+                <h5 class="card-title">Search Service</h5>
+                <p class="card-text">Azure Search Service</p>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="col-12">
+        <div class="alert alert-warning">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            Unable to load system statistics. Please check your Azure configuration.
+            {% if stats and stats.error %}
+            <br><strong>Error:</strong> {{ stats.error }}
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-search me-2"></i>Quick Query</h5>
+            </div>
+            <div class="card-body">
+                <p>Try asking questions about financial data:</p>
+                <ul>
+                    <li>"What are the main revenue sources for Microsoft?"</li>
+                    <li>"Compare Google and NVIDIA operating margins"</li>
+                    <li>"What risk factors does NVIDIA mention?"</li>
+                </ul>
+                <a href="/query" class="btn btn-primary">Start Querying</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-cogs me-2"></i>System Features</h5>
+            </div>
+            <div class="card-body">
+                <ul>
+                    <li><strong>Azure AI Search:</strong> Vector embeddings for semantic search</li>
+                    <li><strong>Azure OpenAI:</strong> GPT-4 for intelligent answers</li>
+                    <li><strong>SEC Filings:</strong> Real 10-K financial documents</li>
+                    <li><strong>Multi-Company:</strong> Google, Microsoft, NVIDIA</li>
+                </ul>
+                <a href="/docs" class="btn btn-outline-primary">View Documentation</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+    
