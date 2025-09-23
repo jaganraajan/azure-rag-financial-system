@@ -67,7 +67,8 @@ class SECEdgarScraper:
             azure_container_name: Azure container name for blob storage
         """
         self.user_agent = user_agent
-        self.companies = self.COMPANIES
+        # Use the class-level COMPANIES but allow for dynamic updates
+        self.companies = self.COMPANIES.copy()
         
         # Request headers for SEC compliance
         self.headers = {
@@ -93,6 +94,35 @@ class SECEdgarScraper:
                 self.blob_service_client = None
         elif azure_storage_connection and not AZURE_STORAGE_AVAILABLE:
             logger.warning("Azure Storage requested but azure-storage-blob not installed")
+    
+    def add_company(self, symbol: str, name: str, cik: str):
+        """
+        Add a new company to the scraper configuration.
+        
+        Args:
+            symbol: Company stock symbol (e.g., 'AAPL')
+            name: Company name (e.g., 'Apple Inc.')
+            cik: SEC Central Index Key
+        """
+        self.companies[symbol.upper()] = {
+            'name': name,
+            'cik': cik
+        }
+        # Also update the class-level dictionary for persistence
+        SECEdgarScraper.COMPANIES[symbol.upper()] = {
+            'name': name,
+            'cik': cik
+        }
+        logger.info(f"Added company: {symbol} - {name} (CIK: {cik})")
+    
+    def get_available_companies(self) -> Dict[str, Dict[str, str]]:
+        """
+        Get all available companies.
+        
+        Returns:
+            Dictionary of company data
+        """
+        return self.companies.copy()
     
     def _ensure_container_exists(self):
         """Ensure the Azure container exists."""

@@ -27,6 +27,13 @@ except ImportError as e:
     print(f"Azure RAG pipeline not available: {e}")
     RAG_AVAILABLE = False
 
+try:
+    from scrapers.sec_edgar_scraper import SECEdgarScraper
+    SCRAPER_AVAILABLE = True
+except ImportError as e:
+    print(f"SEC scraper not available: {e}")
+    SCRAPER_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -206,6 +213,124 @@ def api_process():
         
     except Exception as e:
         logger.error(f"Error processing documents: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/add-company', methods=['POST'])
+def api_admin_add_company():
+    """API endpoint to add a new company to the scraper."""
+    if not SCRAPER_AVAILABLE:
+        return jsonify({'error': 'SEC scraper not available'}), 500
+        
+    try:
+        data = request.get_json()
+        symbol = data.get('symbol', '').strip().upper()
+        name = data.get('name', '').strip()
+        cik = data.get('cik', '').strip()
+        
+        if not symbol or not name or not cik:
+            return jsonify({'error': 'Symbol, name, and CIK are required'}), 400
+        
+        # Add company to scraper configuration
+        SECEdgarScraper.COMPANIES[symbol] = {
+            'name': name,
+            'cik': cik
+        }
+        
+        logger.info(f"Added new company: {symbol} - {name} (CIK: {cik})")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Company {symbol} added successfully',
+            'company': {
+                'symbol': symbol,
+                'name': name,
+                'cik': cik
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error adding company: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/add-years', methods=['POST'])
+def api_admin_add_years():
+    """API endpoint to add years for companies and trigger scraping/processing."""
+    if not SCRAPER_AVAILABLE:
+        return jsonify({'error': 'SEC scraper not available'}), 500
+        
+    try:
+        data = request.get_json()
+        companies = data.get('companies', [])
+        years = data.get('years', [])
+        
+        if not companies or not years:
+            return jsonify({'error': 'Companies and years are required'}), 400
+        
+        # Initialize scraper
+        scraper = SECEdgarScraper()
+        
+        # Create output directory
+        output_dir = 'admin_filings'
+        os.makedirs(output_dir, exist_ok=True)
+        
+        logger.info(f"Starting scraping for companies: {companies}, years: {years}")
+        
+        # Scrape new filings
+        scrape_results = scraper.scrape_all_companies(companies, years, output_dir)
+        
+        # Count successfully downloaded files
+        total_files = sum(len(files) for files in scrape_results.values())
+        
+        if total_files == 0:
+            logger.warning("No files were downloaded")
+            return jsonify({
+                'success': False,
+                'error': 'No filings were downloaded. This might be normal if no filings exist for the specified years.'
+            })
+        
+        # Process the downloaded files with RAG pipeline
+        processing_results = {'processed_files': 0, 'total_chunks': 0, 'search_documents': 0}
+        
+        if rag_pipeline and os.path.exists(output_dir) and os.listdir(output_dir):
+            try:
+                processing_results = rag_pipeline.process_directory(output_dir)
+                logger.info(f"Processing completed: {processing_results}")
+            except Exception as e:
+                logger.error(f"Error during RAG processing: {e}")
+                # Continue even if RAG processing fails
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully processed {total_files} files',
+            'scrape_results': scrape_results,
+            'processed_files': processing_results.get('processed_files', 0),
+            'total_chunks': processing_results.get('total_chunks', 0),
+            'search_documents': processing_results.get('search_documents', 0),
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in add years process: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/companies', methods=['GET'])
+def api_admin_companies():
+    """API endpoint to get available companies."""
+    if not SCRAPER_AVAILABLE:
+        return jsonify({'error': 'SEC scraper not available'}), 500
+        
+    try:
+        companies = SECEdgarScraper.COMPANIES
+        return jsonify({
+            'success': True,
+            'companies': companies
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting companies: {e}")
         return jsonify({'error': str(e)}), 500
 
 
