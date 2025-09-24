@@ -334,6 +334,196 @@ def api_admin_companies():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/admin/storage-files', methods=['GET'])
+def api_admin_storage_files():
+    """API endpoint to list files in Azure Blob Storage."""
+    try:
+        # Get Azure Storage connection string from environment
+        connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+        if not connection_string:
+            return jsonify({
+                'success': False,
+                'error': 'Azure Storage connection string not configured'
+            }), 400
+            
+        container_name = "filings"
+        
+        # Initialize Azure Storage client
+        from azure.storage.blob import BlobServiceClient
+        blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+        container_client = blob_service_client.get_container_client(container_name)
+        
+        # List all blobs in the container
+        files = []
+        try:
+            blob_list = container_client.list_blobs()
+            for blob in blob_list:
+                # Get file info
+                blob_properties = container_client.get_blob_client(blob.name).get_blob_properties()
+                files.append({
+                    'name': blob.name,
+                    'size': blob.size,
+                    'last_modified': blob.last_modified.isoformat() if blob.last_modified else None,
+                    'content_type': blob_properties.content_settings.content_type if hasattr(blob_properties, 'content_settings') else 'application/octet-stream',
+                    'url': f"https://{blob_service_client.account_name}.blob.core.windows.net/{container_name}/{blob.name}"
+                })
+        except Exception as container_error:
+            # Container might not exist or might be empty
+            if "ContainerNotFound" in str(container_error):
+                # Try to create the container
+                container_client.create_container()
+                files = []
+            else:
+                raise container_error
+                
+        return jsonify({
+            'success': True,
+            'files': files,
+            'container': container_name,
+            'total_files': len(files)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error listing storage files: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/admin/trigger-scraper', methods=['POST'])
+def api_admin_trigger_scraper():
+    """API endpoint to trigger scraper job for 10K filings."""
+    if not SCRAPER_AVAILABLE:
+        return jsonify({'error': 'SEC scraper not available'}), 500
+    
+    try:
+        data = request.get_json()
+        companies = data.get('companies', [])
+        years = data.get('years', [])
+        
+        if not companies:
+            return jsonify({'error': 'Companies are required'}), 400
+            
+        if not years:
+            return jsonify({'error': 'Years are required'}), 400
+            
+        # Initialize scraper with Azure Storage
+        connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+        scraper = SECEdgarScraper(
+            azure_storage_connection=connection_string,
+            azure_container_name="filings"
+        )
+        
+        # Create output directory for local backup
+        output_dir = "scraped_filings"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Scrape documents
+        scrape_results = scraper.scrape_all_companies(companies, years, output_dir)
+        
+        # Count total files scraped
+        total_files = sum(len(files) for files in scrape_results.values())
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully scraped {total_files} files',
+            'scrape_results': scrape_results,
+            'total_files': total_files,
+            'companies': companies,
+            'years': years,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error triggering scraper: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/admin/create-embeddings', methods=['POST'])
+def api_admin_create_embeddings():
+    """API endpoint to create vector embeddings for selected files."""
+    if not rag_pipeline:
+        return jsonify({'error': 'RAG pipeline not initialized'}), 500
+    
+    try:
+        data = request.get_json()
+        selected_files = data.get('files', [])
+        
+        if not selected_files:
+            return jsonify({'error': 'No files selected'}), 400
+            
+        # Get Azure Storage connection string from environment
+        connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+        if not connection_string:
+            return jsonify({
+                'error': 'Azure Storage connection string not configured'
+            }), 400
+            
+        container_name = "filings"
+        
+        # Initialize Azure Storage client
+        from azure.storage.blob import BlobServiceClient
+        blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+        container_client = blob_service_client.get_container_client(container_name)
+        
+        # Download selected files and process them
+        temp_dir = "/tmp/embeddings_processing"
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        downloaded_files = []
+        
+        for file_name in selected_files:
+            try:
+                # Download file from Azure Storage
+                blob_client = container_client.get_blob_client(file_name)
+                file_content = blob_client.download_blob().readall()
+                
+                # Save to temporary file
+                temp_file_path = os.path.join(temp_dir, file_name)
+                with open(temp_file_path, 'wb') as f:
+                    f.write(file_content)
+                
+                downloaded_files.append(temp_file_path)
+                logger.info(f"Downloaded file for processing: {file_name}")
+                
+            except Exception as file_error:
+                logger.error(f"Error downloading file {file_name}: {file_error}")
+                continue
+        
+        if not downloaded_files:
+            return jsonify({
+                'error': 'Failed to download any files for processing'
+            }), 400
+        
+        # Process files through RAG pipeline to create embeddings
+        processing_results = rag_pipeline.process_directory(temp_dir)
+        
+        # Clean up temporary files
+        import shutil
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully created embeddings for {len(downloaded_files)} files',
+            'processed_files': processing_results.get('processed_files', 0),
+            'total_chunks': processing_results.get('total_chunks', 0),
+            'search_documents': processing_results.get('search_documents', 0),
+            'selected_files': selected_files,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error creating embeddings: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/health')
 def health_check():
     """Health check endpoint for Azure App Service."""
