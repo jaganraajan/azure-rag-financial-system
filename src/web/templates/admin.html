@@ -232,6 +232,115 @@
 
 {% block scripts %}
 <script>
+ // File management functions
+window.refreshFileList = function() {
+    const container = document.getElementById('fileListContainer');
+    container.innerHTML = `
+        <div class="d-flex justify-content-center p-4">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading files...</span>
+            </div>
+        </div>
+    `;
+
+    fetch('/api/admin/storage-files')
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            displayFileList(data.files, data.container);
+        } else {
+            container.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    ${data.error || 'Failed to load files from Azure Storage'}
+                    <br><small>Make sure Azure Storage connection is configured properly</small>
+                </div>
+            `;
+        }
+    })
+    .catch(error => {
+        console.error('Error loading files:', error);
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-times me-2"></i>Error loading files: ${error.message}
+            </div>
+        `;
+    });
+}
+
+// Make displayFileList globally available
+window.displayFileList = function(files, containerName) {
+    const container = document.getElementById('fileListContainer');
+    
+    if (files.length === 0) {
+        container.innerHTML = `
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle me-2"></i>
+                No files found in Azure Storage container "${containerName}". 
+                <br>Use the scraper to download 10-K filings first.
+            </div>
+        `;
+        return;
+    }
+
+    let html = `
+        <div class="row mb-3">
+            <div class="col">
+                <h6>Container: <span class="text-primary">${containerName}</span> (${files.length} files)</h6>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th width="50">
+                            <input type="checkbox" id="selectAllCheckbox" onchange="toggleAllFiles(this)">
+                        </th>
+                        <th>File Name</th>
+                        <th>Size</th>
+                        <th>Last Modified</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    files.forEach(file => {
+        const sizeKB = (file.size / 1024).toFixed(1);
+        const lastModified = file.last_modified 
+            ? new Date(file.last_modified).toLocaleDateString() 
+            : 'Unknown';
+        
+        html += `
+            <tr>
+                <td>
+                    <input type="checkbox" class="file-checkbox" value="${file.name}" 
+                           onchange="updateEmbeddingsButton()">
+                </td>
+                <td>
+                    <i class="fas fa-file-alt me-1 text-primary"></i>
+                    ${file.name}
+                </td>
+                <td>${sizeKB} KB</td>
+                <td>${lastModified}</td>
+                <td>
+                    <a href="${file.url}" target="_blank" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-external-link-alt me-1"></i>View
+                    </a>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    container.innerHTML = html;
+};
+
 document.addEventListener('DOMContentLoaded', function() {
     const addCompanyForm = document.getElementById('addCompanyForm');
     const addYearsForm = document.getElementById('addYearsForm');
@@ -402,113 +511,77 @@ document.addEventListener('DOMContentLoaded', function() {
         processingResults.innerHTML = html;
     }
 
-    // File management functions
-    window.refreshFileList = function() {
-        const container = document.getElementById('fileListContainer');
-        container.innerHTML = `
-            <div class="d-flex justify-content-center p-4">
-                <div class="spinner-border" role="status">
-                    <span class="visually-hidden">Loading files...</span>
-                </div>
-            </div>
-        `;
-
-        fetch('/api/admin/storage-files')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                displayFileList(data.files, data.container);
-            } else {
-                container.innerHTML = `
-                    <div class="alert alert-warning">
-                        <i class="fas fa-exclamation-triangle me-2"></i>
-                        ${data.error || 'Failed to load files from Azure Storage'}
-                        <br><small>Make sure Azure Storage connection is configured properly</small>
-                    </div>
-                `;
-            }
-        })
-        .catch(error => {
-            console.error('Error loading files:', error);
-            container.innerHTML = `
-                <div class="alert alert-danger">
-                    <i class="fas fa-times me-2"></i>Error loading files: ${error.message}
-                </div>
-            `;
-        });
-    }
-
-    function displayFileList(files, containerName) {
-        const container = document.getElementById('fileListContainer');
+    // function displayFileList(files, containerName) {
+    //     const container = document.getElementById('fileListContainer');
         
-        if (files.length === 0) {
-            container.innerHTML = `
-                <div class="alert alert-info">
-                    <i class="fas fa-info-circle me-2"></i>
-                    No files found in Azure Storage container "${containerName}". 
-                    <br>Use the scraper to download 10-K filings first.
-                </div>
-            `;
-            return;
-        }
+    //     if (files.length === 0) {
+    //         container.innerHTML = `
+    //             <div class="alert alert-info">
+    //                 <i class="fas fa-info-circle me-2"></i>
+    //                 No files found in Azure Storage container "${containerName}". 
+    //                 <br>Use the scraper to download 10-K filings first.
+    //             </div>
+    //         `;
+    //         return;
+    //     }
 
-        let html = `
-            <div class="row mb-3">
-                <div class="col">
-                    <h6>Container: <span class="text-primary">${containerName}</span> (${files.length} files)</h6>
-                </div>
-            </div>
-            <div class="table-responsive">
-                <table class="table table-striped table-hover">
-                    <thead class="table-dark">
-                        <tr>
-                            <th width="50">
-                                <input type="checkbox" id="selectAllCheckbox" onchange="toggleAllFiles(this)">
-                            </th>
-                            <th>File Name</th>
-                            <th>Size</th>
-                            <th>Last Modified</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-        `;
+    //     let html = `
+    //         <div class="row mb-3">
+    //             <div class="col">
+    //                 <h6>Container: <span class="text-primary">${containerName}</span> (${files.length} files)</h6>
+    //             </div>
+    //         </div>
+    //         <div class="table-responsive">
+    //             <table class="table table-striped table-hover">
+    //                 <thead class="table-dark">
+    //                     <tr>
+    //                         <th width="50">
+    //                             <input type="checkbox" id="selectAllCheckbox" onchange="toggleAllFiles(this)">
+    //                         </th>
+    //                         <th>File Name</th>
+    //                         <th>Size</th>
+    //                         <th>Last Modified</th>
+    //                         <th>Actions</th>
+    //                     </tr>
+    //                 </thead>
+    //                 <tbody>
+    //     `;
 
-        files.forEach(file => {
-            const sizeKB = (file.size / 1024).toFixed(1);
-            const lastModified = file.last_modified 
-                ? new Date(file.last_modified).toLocaleDateString() 
-                : 'Unknown';
+    //     files.forEach(file => {
+    //         const sizeKB = (file.size / 1024).toFixed(1);
+    //         const lastModified = file.last_modified 
+    //             ? new Date(file.last_modified).toLocaleDateString() 
+    //             : 'Unknown';
             
-            html += `
-                <tr>
-                    <td>
-                        <input type="checkbox" class="file-checkbox" value="${file.name}" 
-                               onchange="updateEmbeddingsButton()">
-                    </td>
-                    <td>
-                        <i class="fas fa-file-alt me-1 text-primary"></i>
-                        ${file.name}
-                    </td>
-                    <td>${sizeKB} KB</td>
-                    <td>${lastModified}</td>
-                    <td>
-                        <a href="${file.url}" target="_blank" class="btn btn-sm btn-outline-primary">
-                            <i class="fas fa-external-link-alt me-1"></i>View
-                        </a>
-                    </td>
-                </tr>
-            `;
-        });
+    //         html += `
+    //             <tr>
+    //                 <td>
+    //                     <input type="checkbox" class="file-checkbox" value="${file.name}" 
+    //                            onchange="updateEmbeddingsButton()">
+    //                 </td>
+    //                 <td>
+    //                     <i class="fas fa-file-alt me-1 text-primary"></i>
+    //                     ${file.name}
+    //                 </td>
+    //                 <td>${sizeKB} KB</td>
+    //                 <td>${lastModified}</td>
+    //                 <td>
+    //                     <a href="${file.url}" target="_blank" class="btn btn-sm btn-outline-primary">
+    //                         <i class="fas fa-external-link-alt me-1"></i>View
+    //                     </a>
+    //                 </td>
+    //             </tr>
+    //         `;
+    //     });
 
-        html += `
-                    </tbody>
-                </table>
-            </div>
-        `;
+    //     html += `
+    //                 </tbody>
+    //             </table>
+    //         </div>
+    //     `;
 
-        container.innerHTML = html;
-    }
+    //     container.innerHTML = html;
+    // }
 
     window.selectAllFiles = function() {
         const checkboxes = document.querySelectorAll('.file-checkbox');
