@@ -14,6 +14,7 @@ Features:
 """
 
 import os
+from bs4 import BeautifulSoup
 import time
 import requests
 import logging
@@ -74,11 +75,12 @@ class SECEdgarScraper:
         
         # Request headers for SEC compliance
         self.headers = {
-            'User-Agent': user_agent,
+            'User-Agent': 'Azure Financial Analysis Tool 1.0 (jaganraajan@gmail.com)',
+            'Accept': 'application/json, text/html, */*',
             'Accept-Encoding': 'gzip, deflate',
-            'Host': 'data.sec.gov'
+            'Connection': 'keep-alive'
         }
-        
+
         # Azure Storage setup (optional)
         self.azure_storage_connection = azure_storage_connection
         self.azure_container_name = azure_container_name
@@ -251,61 +253,54 @@ class SECEdgarScraper:
             Local file path if successful, None otherwise
         """
         cik = self.companies[company_symbol]['cik']
-        accession_number = filing['accession_number'].replace('-', '')
+        accession_number = filing['accession_number']
+        accession_clean = accession_number.replace('-', '')
         year = filing['year']
-        
-        # Construct filing URL
-        base_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_number}"
-        
-        # Try to find the main 10-K HTML file
-        # Common patterns for 10-K filenames
-        possible_filenames = [
-            f"{accession_number}.htm",
-            f"{accession_number}-10k.htm",
-            f"d{accession_number}.htm",
-            f"form10k.htm",
-            f"10k.htm"
-        ]
-        
-        filing_content = None
-        successful_filename = None
-        
-        for filename in possible_filenames:
-            url = f"{base_url}/{filename}"
-            logger.debug(f"Trying to download: {url}")
-            
-            response = self._make_request(url)
-            if response and response.status_code == 200:
-                filing_content = response.text
-                successful_filename = filename
-                logger.info(f"Successfully downloaded: {url}")
-                break
-            else:
-                logger.debug(f"Failed to download: {url}")
-        
-        if not filing_content:
-            logger.error(f"Could not download 10-K filing for {company_symbol} {year}")
+        # Construct base filing URL
+        base_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_clean}"
+        # Try to get the index page to find the actual 10-K document
+        index_url = f"{base_url}/{accession_number}-index.htm"
+        logger.info(f"Downloading 10-K filing for {company_symbol} {year} (index page2: {index_url})")
+        response = self._make_request(index_url)
+        logger.info('made request')
+        if not response:
+            logger.error(f"Failed to fetch index page: {index_url}")
             return None
-        
-        # Create local filename
+        # Parse the index page to find the 10-K document
+        soup = BeautifulSoup(response.content, 'html.parser')
+        document_link = None
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            if href.endswith('.htm') and '10-k' in href.lower():
+                document_link = href
+                break
+        if not document_link:
+            # Fallback: try primary document from SEC JSON if available
+            document_link = filing.get('primary_document')
+        if not document_link:
+            # Fallback: try common naming pattern
+            document_link = f"{accession_number}.txt"
+        # Download the actual document
+        document_url = f"{base_url}/{document_link}"
+        doc_response = self._make_request(document_url)
+        if not doc_response:
+            logger.error(f"Failed to download document: {document_url}")
+            return None
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+        # Generate filename
         local_filename = f"{company_symbol}_10K_{year}_{accession_number}.htm"
         local_file_path = os.path.join(output_dir, local_filename)
-        
-        # Save to local file
+        # Save the document
         try:
-            os.makedirs(output_dir, exist_ok=True)
-            with open(local_file_path, 'w', encoding='utf-8') as f:
-                f.write(filing_content)
-            
+            with open(local_file_path, 'wb') as f:
+                f.write(doc_response.content)
             file_size = os.path.getsize(local_file_path)
             logger.info(f"Saved {local_filename} ({file_size:,} bytes)")
-            
             # Optionally upload to Azure Storage
-            if self.blob_service_client:
-                self._upload_to_azure_storage(local_filename, filing_content)
-            
+            # if self.blob_service_client:
+            #     self._upload_to_azure_storage(local_filename, doc_response.content.decode('utf-8', errors='ignore'))
             return local_file_path
-            
         except Exception as e:
             logger.error(f"Error saving file {local_filename}: {e}")
             return None
@@ -373,7 +368,18 @@ class SECEdgarScraper:
             file_path = self.download_filing(company_symbol, filing, output_dir)
             if file_path:
                 downloaded_files.append(file_path)
-            
+                # Upload to Azure Blob Storage if configured
+                if self.blob_service_client:
+                    try:
+                        blob_name = os.path.basename(file_path)
+                        with open(file_path, "rb") as data:
+                            self.blob_service_client.get_blob_client(
+                                container=self.azure_container_name,
+                                blob=blob_name
+                            ).upload_blob(data, overwrite=True, content_type='text/html')
+                        logger.info(f"Uploaded {blob_name} to Azure Blob Storage container '{self.azure_container_name}'")
+                    except Exception as e:
+                        logger.error(f"Error uploading {blob_name} to Azure Storage: {e}")
             # Delay between downloads
             time.sleep(1)
         
