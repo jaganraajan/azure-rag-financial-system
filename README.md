@@ -18,7 +18,7 @@ A comprehensive financial analysis system that combines **Azure AI Search** for 
 - **Multi-Year Coverage**: Supports 2022, 2023, and 2024 filings
 - **Intelligent Chunking**: Semantic text splitting with overlap for optimal retrieval
 
-### 🤖 Advanced Query Capabilities
+### 🤖 Advanced Query Capabilities (Feature available in https://github.com/jaganraajan/agent-rag-financial-system)
 - **Natural Language Queries**: Ask questions in plain English
 - **Comparative Analysis**: "Which company had higher operating margins?"
 - **Temporal Analysis**: "How did revenue change from 2022 to 2023?"
