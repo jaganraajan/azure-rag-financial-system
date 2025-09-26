@@ -89,22 +89,251 @@ class DocumentProcessor:
             self.tokenizer = tiktoken.get_encoding("cl100k_base")
     
     def extract_text_from_html(self, html_content: str) -> str:
-        """Extract clean text from HTML SEC filing."""
+        """Extract structured text from HTML SEC filing with section and table markers."""
         soup = BeautifulSoup(html_content, 'html.parser')
-        
-        # Remove script and style elements
         for script in soup(["script", "style"]):
             script.decompose()
-        
-        # Get text and clean it
-        text = soup.get_text()
-        
-        # Clean up whitespace
-        lines = (line.strip() for line in text.splitlines())
-        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-        text = ' '.join(chunk for chunk in chunks if chunk)
-        
-        return text
+        text_parts = []
+        processed_elements = set()
+        all_elements = soup.find_all(['h1', 'h2', 'h3', 'h4', 'table', 'p', 'div', 'ul', 'ol'])
+        for element in all_elements:
+            if id(element) in processed_elements:
+                continue
+            if element.name in ['h1', 'h2', 'h3', 'h4']:
+                level = element.name[1]
+                header_text = element.get_text(strip=True)
+                if header_text and len(header_text) > 3:
+                    marker = "\n" + "=" * max(20, 60 - int(level) * 10) + "\n"
+                    text_parts.append(f"{marker}SECTION_{level}: {header_text}{marker}")
+                processed_elements.add(id(element))
+            elif element.name == 'table':
+                parent_table = element.find_parent('table')
+                if parent_table and id(parent_table) not in processed_elements:
+                    continue
+                table_text = self._extract_table_text(element)
+                if table_text and len(table_text.strip()) > 50:
+                    text_parts.append(f"\n[FINANCIAL_TABLE]\n{table_text}\n[/FINANCIAL_TABLE]\n")
+                processed_elements.add(id(element))
+            elif element.name in ['p', 'div']:
+                parent_processed = False
+                for parent in element.parents:
+                    if id(parent) in processed_elements:
+                        parent_processed = True
+                        break
+                if not parent_processed:
+                    para_text = element.get_text(strip=True)
+                    if para_text and len(para_text) > 20:
+                        text_parts.append(para_text)
+                    processed_elements.add(id(element))
+            elif element.name in ['ul', 'ol']:
+                parent_processed = False
+                for parent in element.parents:
+                    if id(parent) in processed_elements:
+                        parent_processed = True
+                        break
+                if not parent_processed:
+                    list_text = self._extract_list_text(element)
+                    if list_text:
+                        text_parts.append(list_text)
+                    processed_elements.add(id(element))
+        return '\n\n'.join(text_parts)
+
+    def _extract_table_text(self, table) -> str:
+        rows = []
+        headers = []
+        for header in table.find_all(['th']):
+            header_text = header.get_text(strip=True)
+            if header_text:
+                headers.append(header_text)
+        if headers:
+            rows.append(" | ".join(headers))
+            rows.append("-" * 50)
+        for row in table.find_all('tr'):
+            cells = row.find_all(['td'])
+            cell_texts = [cell.get_text(strip=True) for cell in cells]
+            if cell_texts:
+                rows.append(" | ".join(cell_texts))
+        return '\n'.join(rows)
+
+    def _extract_list_text(self, element) -> str:
+        items = [li.get_text(strip=True) for li in element.find_all('li')]
+        if items:
+            return '\n'.join([f"- {item}" for item in items])
+        return ""
+
+    def chunk_text(self, text: str, metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Split text into chunks with token limits, respecting 10-K document structure."""
+        chunks = []
+        sections = self._identify_sections(text)
+        for section in sections:
+            section_chunks = self._chunk_section(section, metadata)
+            chunks.extend(section_chunks)
+        return chunks
+
+    def _identify_sections(self, text: str) -> List[Dict[str, Any]]:
+        sections = []
+        current_section = ""
+        current_section_title = ""
+        current_section_level = 0
+        lines = text.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith('SECTION_'):
+                if current_section.strip():
+                    sections.append({
+                        'title': current_section_title,
+                        'content': current_section.strip(),
+                        'level': current_section_level,
+                        'type': self._classify_section_type(current_section_title)
+                    })
+                level_match = line.split('SECTION_')[1].split(':')[0]
+                current_section_level = int(level_match) if level_match.isdigit() else 1
+                current_section_title = line.split(':', 1)[1].strip() if ':' in line else line
+                current_section = ""
+            elif line.startswith('='):
+                continue
+            else:
+                if line:
+                    current_section += line + '\n'
+        if current_section.strip():
+            sections.append({
+                'title': current_section_title,
+                'content': current_section.strip(),
+                'level': current_section_level,
+                'type': self._classify_section_type(current_section_title)
+            })
+        if not sections:
+            sections.append({
+                'title': 'Document Content',
+                'content': text,
+                'level': 1,
+                'type': 'general'
+            })
+        return sections
+
+    def _classify_section_type(self, title: str) -> str:
+        title_lower = title.lower()
+        if any(keyword in title_lower for keyword in ['financial', 'statement', 'income', 'balance', 'cash flow']):
+            return 'financial'
+        elif any(keyword in title_lower for keyword in ['risk', 'factor']):
+            return 'risk'
+        elif any(keyword in title_lower for keyword in ['business', 'overview', 'operation']):
+            return 'business'
+        elif any(keyword in title_lower for keyword in ['legal', 'proceeding', 'litigation']):
+            return 'legal'
+        elif any(keyword in title_lower for keyword in ['management', 'discussion', 'analysis', 'md&a']):
+            return 'mda'
+        else:
+            return 'general'
+
+    def _chunk_section(self, section: Dict, metadata: Optional[Dict] = None) -> List[Dict[str, Any]]:
+        content = section['content']
+        section_chunks = []
+        if '[FINANCIAL_TABLE]' in content:
+            table_chunks = self._chunk_financial_tables(content, section, metadata)
+            section_chunks.extend(table_chunks)
+            content = re.sub(r'\[FINANCIAL_TABLE\].*?\[/FINANCIAL_TABLE\]', '', content, flags=re.DOTALL)
+        if content.strip():
+            regular_chunks = self._chunk_regular_content(content, section, metadata)
+            section_chunks.extend(regular_chunks)
+        return section_chunks
+
+    def _chunk_financial_tables(self, content: str, section: Dict, metadata: Optional[Dict] = None) -> List[Dict[str, Any]]:
+        chunks = []
+        table_pattern = r'\[FINANCIAL_TABLE\](.*?)\[/FINANCIAL_TABLE\]'
+        tables = re.findall(table_pattern, content, re.DOTALL)
+        for i, table_content in enumerate(tables):
+            table_content = table_content.strip()
+            if not table_content:
+                continue
+            chunk_metadata = {
+                'section_title': section['title'],
+                'section_level': section['level'],
+                'section_type': section['type'],
+                'content_type': 'financial_table',
+                'table_index': i
+            }
+            if metadata:
+                chunk_metadata.update(metadata)
+            table_tokens = self.tokenizer.encode(table_content)
+            if len(table_tokens) <= self.chunk_size:
+                chunks.append(self._create_chunk(table_content, chunk_metadata))
+            else:
+                rows = table_content.split('\n')
+                current_chunk = ""
+                current_tokens = 0
+                for row in rows:
+                    row_tokens = len(self.tokenizer.encode(row))
+                    if current_tokens + row_tokens > self.chunk_size:
+                        if current_chunk:
+                            chunks.append(self._create_chunk(current_chunk.strip(), chunk_metadata))
+                        current_chunk = row + '\n'
+                        current_tokens = row_tokens
+                    else:
+                        current_chunk += row + '\n'
+                        current_tokens += row_tokens
+                if current_chunk.strip():
+                    chunks.append(self._create_chunk(current_chunk.strip(), chunk_metadata))
+        return chunks
+
+    def _chunk_regular_content(self, content: str, section: Dict, metadata: Optional[Dict] = None) -> List[Dict[str, Any]]:
+        chunks = []
+        paragraphs = content.split('\n\n')
+        current_chunk = ""
+        current_tokens = 0
+        chunk_metadata = {
+            'section_title': section['title'],
+            'section_level': section['level'],
+            'section_type': section['type'],
+            'content_type': 'text'
+        }
+        if metadata:
+            chunk_metadata.update(metadata)
+        for paragraph in paragraphs:
+            paragraph = paragraph.strip()
+            if not paragraph:
+                continue
+            paragraph_tokens = len(self.tokenizer.encode(paragraph))
+            if paragraph_tokens > self.chunk_size:
+                sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', paragraph)
+                for sentence in sentences:
+                    sentence_tokens = len(self.tokenizer.encode(sentence))
+                    if current_tokens + sentence_tokens > self.chunk_size:
+                        if current_chunk:
+                            chunks.append(self._create_chunk(current_chunk, chunk_metadata))
+                        current_chunk = sentence
+                        current_tokens = sentence_tokens
+                    else:
+                        if current_chunk:
+                            current_chunk += " " + sentence
+                        else:
+                            current_chunk = sentence
+                        current_tokens += sentence_tokens
+            else:
+                if current_tokens + paragraph_tokens > self.chunk_size:
+                    if current_chunk:
+                        chunks.append(self._create_chunk(current_chunk, chunk_metadata))
+                    current_chunk = paragraph
+                    current_tokens = paragraph_tokens
+                else:
+                    if current_chunk:
+                        current_chunk += "\n\n" + paragraph
+                    else:
+                        current_chunk = paragraph
+                    current_tokens += paragraph_tokens
+        if current_chunk:
+            chunks.append(self._create_chunk(current_chunk, chunk_metadata))
+        return chunks
+
+    def _create_chunk(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        chunk = {
+            'text': text.strip(),
+            'token_count': len(self.tokenizer.encode(text))
+        }
+        if metadata:
+            chunk.update(metadata)
+        chunk['id'] = f"{metadata.get('company', 'unknown')}_{metadata.get('year', 'unknown')}_{metadata.get('chunk_id', 0)}"
+        return chunk
     
     def extract_metadata(self, filename: str) -> Dict[str, Any]:
         """Extract metadata from filename."""

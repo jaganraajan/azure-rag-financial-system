@@ -82,7 +82,8 @@ class SECEdgarScraper:
         }
 
         # Azure Storage setup (optional)
-        self.azure_storage_connection = azure_storage_connection
+        load_dotenv()
+        self.azure_storage_connection = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
         self.azure_container_name = azure_container_name
         self.blob_service_client = None
         
@@ -298,8 +299,25 @@ class SECEdgarScraper:
             file_size = os.path.getsize(local_file_path)
             logger.info(f"Saved {local_filename} ({file_size:,} bytes)")
             # Optionally upload to Azure Storage
-            # if self.blob_service_client:
-            #     self._upload_to_azure_storage(local_filename, doc_response.content.decode('utf-8', errors='ignore'))
+            load_dotenv()
+            connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+            container_name = "filings"
+            blob_service_client = None
+            container_client = None
+            if connection_string:
+                print("Azure Storage connection string found, initializing client...")
+                blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+                container_client = blob_service_client.get_container_client(container_name)
+                try:
+                    print('Creating container if not exists...')
+                    container_client.create_container()
+                except Exception:
+                    pass  # Container may already exist
+            if container_client:
+                blob_name = os.path.basename(local_file_path)
+                with open(local_file_path, "rb") as data:
+                    container_client.upload_blob(name=blob_name, data=data, overwrite=True)
+                print(f"Uploaded {local_filename} to Azure Blob Storage container '{container_name}'")
             return local_file_path
         except Exception as e:
             logger.error(f"Error saving file {local_filename}: {e}")
