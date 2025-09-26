@@ -95,48 +95,10 @@
                 </div>
                 
                 <div class="d-flex gap-2 flex-wrap">
-                    <button type="button" class="btn btn-success" onclick="triggerScraperJob()">
-                        <i class="fas fa-download me-2"></i>Trigger Scraper Job
-                    </button>
                     <button type="button" class="btn btn-info" onclick="createEmbeddingsForSelected()" disabled id="createEmbeddingsBtn">
                         <i class="fas fa-vector-square me-2"></i>Create Embeddings for Selected
                     </button>
-                    <button type="button" class="btn btn-outline-secondary" onclick="selectAllFiles()">
-                        <i class="fas fa-check-square me-1"></i>Select All
-                    </button>
-                    <button type="button" class="btn btn-outline-secondary" onclick="deselectAllFiles()">
-                        <i class="fas fa-square me-1"></i>Deselect All
-                    </button>
                 </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Processing Status -->
-<div class="row mt-4">
-    <div class="col-md-12">
-        <div class="card">
-            <div class="card-header">
-                <h5><i class="fas fa-tasks me-2"></i>Processing Status</h5>
-            </div>
-            <div class="card-body">
-                <div id="processingStatus" class="d-none">
-                    <div class="alert alert-info">
-                        <div class="d-flex align-items-center">
-                            <div class="spinner-border spinner-border-sm me-3" role="status"></div>
-                            <div>
-                                <strong>Processing...</strong>
-                                <div id="processingMessage">Preparing to scrape and process filings...</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="progress mb-3">
-                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
-                             id="processingProgress" role="progressbar" style="width: 0%"></div>
-                    </div>
-                </div>
-                <div id="processingResults"></div>
             </div>
         </div>
     </div>
@@ -253,6 +215,108 @@ window.displayFileList = function(files, containerName) {
     `;
 
     container.innerHTML = html;
+};
+
+window.updateEmbeddingsButton = function() {
+    // Always reference the button from the DOM
+    const createEmbeddingsBtn = document.getElementById('createEmbeddingsBtn');
+    const checkedBoxes = document.querySelectorAll('.file-checkbox:checked');
+    if (createEmbeddingsBtn) {
+        createEmbeddingsBtn.disabled = checkedBoxes.length === 0;
+        const text = checkedBoxes.length === 0 
+            ? 'Create Embeddings for Selected'
+            : `Create Embeddings (${checkedBoxes.length} selected)`;
+        createEmbeddingsBtn.innerHTML = `<i class="fas fa-vector-square me-2"></i>${text}`;
+    }
+}
+
+window.createEmbeddingsForSelected = function() {
+    const checkedBoxes = document.querySelectorAll('.file-checkbox:checked');
+    const selectedFiles = Array.from(checkedBoxes).map(cb => cb.value);
+    if (selectedFiles.length === 0) {
+        alert('Please select at least one file to create embeddings');
+        return;
+    }
+    showProcessingStatus('Creating vector embeddings...');
+    updateProgress(10, `Processing ${selectedFiles.length} selected files...`);
+    fetch('/api/admin/create-embeddings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            files: selectedFiles
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            updateProgress(100, 'Vector embeddings created successfully!');
+            setTimeout(() => {
+                hideProcessingStatus();
+                showResults(`<div class="alert alert-success">
+                    <i class="fas fa-check me-2"></i>Successfully created embeddings for ${data.processed_files} files.
+                    <br><small>Generated ${data.total_chunks} text chunks and ${data.search_documents} search documents</small>
+                    <br><strong>Files processed:</strong> ${selectedFiles.join(', ')}
+                </div>`);
+                deselectAllFiles();
+            }, 1000);
+        } else {
+            hideProcessingStatus();
+            showResults(`<div class="alert alert-danger">
+                <i class="fas fa-times me-2"></i>Error: ${data.error || 'Failed to create embeddings'}
+            </div>`);
+        }
+    })
+    .catch(error => {
+        hideProcessingStatus();
+        console.error('Error:', error);
+        showResults(`<div class="alert alert-danger">
+            <i class="fas fa-times me-2"></i>Error creating embeddings: ${error.message}
+        </div>`);
+    });
+}
+
+window.showProcessingStatus = function(message) {
+    const statusDiv = document.getElementById('processingStatus');
+    if (statusDiv) {
+        statusDiv.style.display = 'block';
+        statusDiv.innerHTML = `<div class="alert alert-info">${message}</div>`;
+    }
+};
+
+window.hideProcessingStatus = function() {
+    const statusDiv = document.getElementById('processingStatus');
+    if (statusDiv) {
+        statusDiv.style.display = 'none';
+        statusDiv.innerHTML = '';
+    }
+};
+
+window.updateProgress = function(percent, message) {
+    const statusDiv = document.getElementById('processingStatus');
+    if (statusDiv) {
+        statusDiv.innerHTML = `
+            <div class="progress mb-2">
+                <div class="progress-bar" role="progressbar" style="width: ${percent}%;">
+                    ${percent}%
+                </div>
+            </div>
+            <div>${message}</div>
+        `;
+    }
+};
+
+window.showResults = function(html) {
+    const resultsDiv = document.getElementById('resultsContainer');
+    if (resultsDiv) {
+        resultsDiv.innerHTML = html;
+    }
+};
+
+window.deselectAllFiles = function() {
+    document.querySelectorAll('.file-checkbox:checked').forEach(cb => cb.checked = false);
+    window.updateEmbeddingsButton();
 };
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -519,16 +583,6 @@ document.addEventListener('DOMContentLoaded', function() {
         updateEmbeddingsButton();
     }
 
-    window.updateEmbeddingsButton = function() {
-        const checkedBoxes = document.querySelectorAll('.file-checkbox:checked');
-        createEmbeddingsBtn.disabled = checkedBoxes.length === 0;
-        
-        // Update text to show count
-        const text = checkedBoxes.length === 0 
-            ? 'Create Embeddings for Selected'
-            : `Create Embeddings (${checkedBoxes.length} selected)`;
-        createEmbeddingsBtn.innerHTML = `<i class="fas fa-vector-square me-2"></i>${text}`;
-    }
 
     window.triggerScraperJob = function() {
         const selectedCompanies = Array.from(document.getElementById('selectedCompanies').selectedOptions)
@@ -588,56 +642,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    window.createEmbeddingsForSelected = function() {
-        const checkedBoxes = document.querySelectorAll('.file-checkbox:checked');
-        const selectedFiles = Array.from(checkedBoxes).map(cb => cb.value);
-        
-        if (selectedFiles.length === 0) {
-            alert('Please select at least one file to create embeddings');
-            return;
-        }
-
-        showProcessingStatus('Creating vector embeddings...');
-        updateProgress(10, `Processing ${selectedFiles.length} selected files...`);
-
-        fetch('/api/admin/create-embeddings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                files: selectedFiles
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                updateProgress(100, 'Vector embeddings created successfully!');
-                setTimeout(() => {
-                    hideProcessingStatus();
-                    showResults(`<div class="alert alert-success">
-                        <i class="fas fa-check me-2"></i>Successfully created embeddings for ${data.processed_files} files.
-                        <br><small>Generated ${data.total_chunks} text chunks and ${data.search_documents} search documents</small>
-                        <br><strong>Files processed:</strong> ${selectedFiles.join(', ')}
-                    </div>`);
-                    // Deselect all files after processing
-                    deselectAllFiles();
-                }, 1000);
-            } else {
-                hideProcessingStatus();
-                showResults(`<div class="alert alert-danger">
-                    <i class="fas fa-times me-2"></i>Error: ${data.error || 'Failed to create embeddings'}
-                </div>`);
-            }
-        })
-        .catch(error => {
-            hideProcessingStatus();
-            console.error('Error:', error);
-            showResults(`<div class="alert alert-danger">
-                <i class="fas fa-times me-2"></i>Error creating embeddings: ${error.message}
-            </div>`);
-        });
-    }
 });
 </script>
 {% endblock %}

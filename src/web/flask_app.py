@@ -475,25 +475,30 @@ def api_admin_create_embeddings():
         container_client = blob_service_client.get_container_client(container_name)
         
         # Download selected files and process them
+
         temp_dir = "/tmp/embeddings_processing"
+        # Clear temp_dir before downloading
+        import shutil
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
         os.makedirs(temp_dir, exist_ok=True)
-        
+
         downloaded_files = []
-        
+
         for file_name in selected_files:
             try:
                 # Download file from Azure Storage
                 blob_client = container_client.get_blob_client(file_name)
                 file_content = blob_client.download_blob().readall()
-                
+
                 # Save to temporary file
                 temp_file_path = os.path.join(temp_dir, file_name)
                 with open(temp_file_path, 'wb') as f:
                     f.write(file_content)
-                
+
                 downloaded_files.append(temp_file_path)
                 logger.info(f"Downloaded file for processing: {file_name}")
-                
+
             except Exception as file_error:
                 logger.error(f"Error downloading file {file_name}: {file_error}")
                 continue
